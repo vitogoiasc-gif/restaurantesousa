@@ -1,28 +1,28 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, type FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
 
 export function Login() {
-  const [password, setPassword] = useState('');
-  const [errorMessage, setErrorMessage] = useState('');
+  const [password, setPassword] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
   const navigate = useNavigate();
 
   const adminPassword = import.meta.env.VITE_ADMIN_PASSWORD;
 
-  const handleEnter = (e: React.FormEvent) => {
+  const handleEnter = (e: FormEvent) => {
     e.preventDefault();
 
     if (!adminPassword) {
-      setErrorMessage('Senha do painel não configurada no arquivo .env');
+      setErrorMessage("Senha do painel não configurada no arquivo .env");
       return;
     }
 
     if (password === adminPassword) {
-      localStorage.setItem('admin_authenticated', 'true');
-      navigate('/admin/dashboard');
+      localStorage.setItem("admin_authenticated", "true");
+      navigate("/admin/dashboard");
       return;
     }
 
-    setErrorMessage('Senha incorreta.');
+    setErrorMessage("Senha incorreta.");
   };
 
   return (
@@ -48,7 +48,7 @@ export function Login() {
               value={password}
               onChange={(e) => {
                 setPassword(e.target.value);
-                setErrorMessage('');
+                setErrorMessage("");
               }}
               className="w-full border rounded-2xl px-4 py-3 outline-none focus:ring-2 focus:ring-emerald-500"
             />

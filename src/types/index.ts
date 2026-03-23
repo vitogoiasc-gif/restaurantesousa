@@ -38,12 +38,33 @@ export type Product = {
   option_groups?: ProductOptionGroup[];
 };
 
+export type RestaurantSettings = {
+  id: string;
+  name: string | null;
+  phone: string | null;
+  address: string | null;
+  opening_hours: string | null;
+  logo_url?: string | null;
+  banner_url?: string | null;
+  accepting_orders?: boolean;
+  automatic_schedule_enabled?: boolean;
+  business_hours?: Record<
+    string,
+    {
+      enabled: boolean;
+      open: string;
+      close: string;
+    }
+  > | null;
+};
+
 export type CartItemOption = {
   name: string;
   price: number;
 };
 
 export type CartItem = {
+  id: string;
   product: Product;
   quantity: number;
   notes?: string;
@@ -51,9 +72,9 @@ export type CartItem = {
 };
 
 export type OrderStatus =
-  | 'novo'
-  | 'confirmado'
-  | 'em preparo'
-  | 'saiu para entrega'
-  | 'finalizado'
-  | 'cancelado';
+  | "novo"
+  | "confirmado"
+  | "em preparo"
+  | "saiu para entrega"
+  | "finalizado"
+  | "cancelado";

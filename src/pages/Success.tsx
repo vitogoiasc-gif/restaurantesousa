@@ -1,46 +1,52 @@
-import { useLocation, useNavigate, Navigate } from 'react-router-dom';
-import { CheckCircle, ArrowLeft, Utensils } from 'lucide-react';
+import { Link, useLocation, Navigate } from "react-router-dom";
+
+type SuccessState = {
+  orderNumber?: number;
+  customerName?: string;
+};
 
 export function Success() {
   const location = useLocation();
-  const navigate = useNavigate();
-  const state = location.state as { orderNumber?: number; customerName?: string } | null;
+  const state = (location.state || {}) as SuccessState;
 
-  if (!state || !state.orderNumber) {
+  if (!state.orderNumber) {
     return <Navigate to="/" replace />;
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
-      <div className="bg-white max-w-md w-full rounded-3xl shadow-xl p-8 text-center animate-in zoom-in duration-500">
-        <div className="flex justify-center mb-6">
-          <div className="bg-emerald-100 p-4 rounded-full">
-            <CheckCircle className="w-16 h-16 text-emerald-600" />
-          </div>
-        </div>
-        
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Pedido Confirmado!</h1>
-        <p className="text-gray-600 mb-8">
-          Obrigado pela preferência, <span className="font-semibold">{state.customerName}</span>. 
-          Seu pedido já foi recebido pelo restaurante e logo começará a ser preparado.
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      <div className="w-full max-w-lg bg-white rounded-3xl shadow-sm border p-8 text-center">
+        <div className="text-5xl mb-4">✅</div>
+
+        <h1 className="text-3xl font-bold text-gray-900">
+          Pedido realizado com sucesso!
+        </h1>
+
+        <p className="text-gray-600 mt-3">
+          {state.customerName
+            ? `${state.customerName}, seu pedido foi enviado para o restaurante.`
+            : "Seu pedido foi enviado para o restaurante."}
         </p>
 
-        <div className="bg-gray-50 rounded-2xl p-6 mb-8 border border-gray-100">
-          <p className="text-sm text-gray-500 uppercase tracking-wider font-medium mb-1">
-            Número do Pedido
+        <div className="mt-6 rounded-2xl bg-emerald-50 border border-emerald-200 p-5">
+          <p className="text-sm text-emerald-700 font-medium">
+            Número do seu pedido
           </p>
-          <p className="text-5xl font-black text-emerald-600">
+          <p className="text-4xl font-bold text-emerald-700 mt-2">
             #{state.orderNumber}
           </p>
         </div>
 
-        <button
-          onClick={() => navigate('/')}
-          className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-4 px-6 rounded-xl font-medium text-lg transition-colors flex items-center justify-center gap-2"
+        <p className="text-sm text-gray-500 mt-5">
+          Guarde esse número para acompanhar o atendimento.
+        </p>
+
+        <Link
+          to="/"
+          className="inline-flex mt-8 bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-2xl font-semibold"
         >
-          <ArrowLeft className="w-5 h-5" />
-          Voltar para o Cardápio
-        </button>
+          Voltar ao cardápio
+        </Link>
       </div>
     </div>
   );

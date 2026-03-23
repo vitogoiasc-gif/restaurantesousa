@@ -1,8 +1,13 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { X, Minus, Plus, Trash2 } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { useCartStore } from "../store/cartStore";
-import { getRestaurantStatus, normalizeBusinessHours } from "../lib/restaurantStatus";
+import {
+  getRestaurantStatus,
+  normalizeBusinessHours,
+} from "../lib/restaurantStatus";
+import type { CartItem, RestaurantSettings } from "../types";
 
 type CartProps = {
   isOpen: boolean;
@@ -10,7 +15,74 @@ type CartProps = {
   isRestaurantOpen: boolean;
 };
 
+type CreateOrderRpcResponse = {
+  order_id: string;
+  order_number: number;
+};
+
+type CreateOrderRpcPayload = {
+  customer_name: string;
+  customer_phone: string;
+  customer_address: string;
+  notes: string | null;
+  status: string;
+  subtotal: number;
+  total: number;
+  items: Array<{
+    product_id: string;
+    product_name: string;
+    unit_price: number;
+    quantity: number;
+    notes: string | null;
+    selected_options: Array<{
+      name: string;
+      price: number;
+    }>;
+  }>;
+};
+
+const formatCurrency = (value: number) =>
+  new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  }).format(value);
+
+const formatPhone = (value: string) => {
+  const digits = value.replace(/\D/g, "").slice(0, 11);
+
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 7) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+  if (digits.length <= 10) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  }
+
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+};
+
+const sanitizeCartItemsForOrder = (items: CartItem[]) =>
+  items.map((item) => {
+    const optionsTotal =
+      item.selectedOptions?.reduce(
+        (sum, option) => sum + Number(option.price || 0),
+        0
+      ) || 0;
+
+    return {
+      product_id: item.product.id,
+      product_name: item.product.name,
+      unit_price: Number(item.product.price) + optionsTotal,
+      quantity: item.quantity,
+      notes: item.notes?.trim() || null,
+      selected_options: (item.selectedOptions || []).map((option) => ({
+        name: option.name,
+        price: Number(option.price || 0),
+      })),
+    };
+  });
+
 export function Cart({ isOpen, onClose, isRestaurantOpen }: CartProps) {
+  const navigate = useNavigate();
+
   const items = useCartStore((state) => state.items);
   const removeItem = useCartStore((state) => state.removeItem);
   const updateQuantity = useCartStore((state) => state.updateQuantity);
@@ -24,6 +96,15 @@ export function Cart({ isOpen, onClose, isRestaurantOpen }: CartProps) {
   const [loading, setLoading] = useState(false);
 
   if (!isOpen) return null;
+
+  const resetForm = () => {
+    clearCart();
+    setCustomerName("");
+    setCustomerPhone("");
+    setCustomerAddress("");
+    setNotes("");
+    onClose();
+  };
 
   const handleFinishOrder = async () => {
     if (!isRestaurantOpen) {
@@ -41,8 +122,9 @@ export function Cart({ isOpen, onClose, isRestaurantOpen }: CartProps) {
       return;
     }
 
-    if (!customerPhone.trim()) {
-      alert("Digite seu telefone.");
+    const phoneDigits = customerPhone.replace(/\D/g, "");
+    if (phoneDigits.length < 10) {
+      alert("Digite um telefone válido com DDD.");
       return;
     }
 
@@ -67,7 +149,7 @@ export function Cart({ isOpen, onClose, isRestaurantOpen }: CartProps) {
       }
 
       const currentRestaurantStatus = getRestaurantStatus({
-        ...restaurantSettings,
+        ...(restaurantSettings as RestaurantSettings),
         accepting_orders: restaurantSettings?.accepting_orders ?? true,
         automatic_schedule_enabled:
           restaurantSettings?.automatic_schedule_enabled ?? false,
@@ -79,92 +161,49 @@ export function Cart({ isOpen, onClose, isRestaurantOpen }: CartProps) {
         return;
       }
 
-      const subtotal = total;
-      const orderTotal = total;
+      const orderPayload: CreateOrderRpcPayload = {
+        customer_name: customerName.trim(),
+        customer_phone: phoneDigits,
+        customer_address: customerAddress.trim(),
+        notes: notes.trim() || null,
+        status: "novo",
+        subtotal: total,
+        total,
+        items: sanitizeCartItemsForOrder(items),
+      };
 
-      const { data: orderData, error: orderError } = await supabase
-        .from("orders")
-        .insert({
-          customer_name: customerName,
-          customer_phone: customerPhone,
-          customer_address: customerAddress,
-          notes,
-          status: "novo",
-          subtotal,
-          total: orderTotal,
-        })
-        .select()
-        .single();
+      const { data, error } = await supabase.rpc("create_order_with_items", {
+        p_order: orderPayload,
+      });
 
-      if (orderError) {
-        console.error("Erro ao criar pedido:", orderError);
-        alert("Erro ao criar pedido.");
+      if (error) {
+        console.error("Erro ao criar pedido via função SQL:", error);
+        alert(
+          "Erro ao finalizar pedido. Verifique se a função SQL foi criada no Supabase."
+        );
         return;
       }
 
-      const orderItemsPayload = items.map((item) => {
-        const optionsTotal =
-          item.selectedOptions?.reduce((sum, option) => sum + option.price, 0) || 0;
+      const createdOrder = Array.isArray(data)
+        ? (data[0] as CreateOrderRpcResponse | undefined)
+        : (data as CreateOrderRpcResponse | null);
 
-        return {
-          order_id: orderData.id,
-          product_id: item.product.id,
-          product_name: item.product.name,
-          unit_price: Number(item.product.price) + optionsTotal,
-          quantity: item.quantity,
-          notes: item.notes || null,
-        };
-      });
-
-      const { data: insertedItems, error: itemsError } = await supabase
-        .from("order_items")
-        .insert(orderItemsPayload)
-        .select();
-
-      if (itemsError || !insertedItems) {
-        console.error("Erro ao salvar itens do pedido:", itemsError);
-        alert("Pedido criado, mas houve erro ao salvar os itens.");
+      if (!createdOrder?.order_id || !createdOrder?.order_number) {
+        alert("Pedido criado, mas não foi possível confirmar o número do pedido.");
         return;
       }
 
-      const optionsPayload: {
-        order_item_id: string;
-        option_name: string;
-        option_price: number;
-      }[] = [];
+      const customerNameValue = customerName.trim();
+      const orderNumber = createdOrder.order_number;
 
-      insertedItems.forEach((insertedItem, index) => {
-        const cartItem = items[index];
+      resetForm();
 
-        cartItem.selectedOptions?.forEach((option) => {
-          optionsPayload.push({
-            order_item_id: insertedItem.id,
-            option_name: option.name,
-            option_price: option.price,
-          });
-        });
+      navigate("/success", {
+        state: {
+          orderNumber,
+          customerName: customerNameValue,
+        },
       });
-
-      if (optionsPayload.length > 0) {
-        const { error: optionsError } = await supabase
-          .from("order_item_options")
-          .insert(optionsPayload);
-
-        if (optionsError) {
-          console.error("Erro ao salvar adicionais:", optionsError);
-          alert("Pedido salvo, mas houve erro ao salvar os adicionais.");
-          return;
-        }
-      }
-
-      alert("Pedido realizado com sucesso!");
-
-      clearCart();
-      setCustomerName("");
-      setCustomerPhone("");
-      setCustomerAddress("");
-      setNotes("");
-      onClose();
     } catch (error) {
       console.error("Erro ao finalizar pedido:", error);
       alert("Erro inesperado ao finalizar pedido.");
@@ -199,17 +238,17 @@ export function Cart({ isOpen, onClose, isRestaurantOpen }: CartProps) {
             </p>
           ) : (
             <>
-              {items.map((item, index) => {
+              {items.map((item) => {
                 const optionsTotal =
-                  item.selectedOptions?.reduce((sum, option) => sum + option.price, 0) || 0;
+                  item.selectedOptions?.reduce(
+                    (sum, option) => sum + option.price,
+                    0
+                  ) || 0;
 
                 const unitPrice = Number(item.product.price) + optionsTotal;
 
                 return (
-                  <div
-                    key={`${item.product.id}-${index}`}
-                    className="border rounded-2xl p-4"
-                  >
+                  <div key={item.id} className="border rounded-2xl p-4">
                     <div className="flex gap-3">
                       <img
                         src={item.product.image_url}
@@ -224,25 +263,19 @@ export function Cart({ isOpen, onClose, isRestaurantOpen }: CartProps) {
                         </h3>
 
                         <p className="text-sm text-gray-500 mt-1">
-                          {new Intl.NumberFormat("pt-BR", {
-                            style: "currency",
-                            currency: "BRL",
-                          }).format(unitPrice)}
+                          {formatCurrency(unitPrice)}
                         </p>
 
                         {item.selectedOptions && item.selectedOptions.length > 0 && (
                           <div className="mt-2 space-y-1">
                             {item.selectedOptions.map((option, optionIndex) => (
                               <p
-                                key={`${option.name}-${optionIndex}`}
+                                key={`${item.id}-${option.name}-${optionIndex}`}
                                 className="text-xs text-gray-500"
                               >
                                 + {option.name}
                                 {option.price > 0
-                                  ? ` (${new Intl.NumberFormat("pt-BR", {
-                                      style: "currency",
-                                      currency: "BRL",
-                                    }).format(option.price)})`
+                                  ? ` (${formatCurrency(option.price)})`
                                   : ""}
                               </p>
                             ))}
@@ -258,9 +291,7 @@ export function Cart({ isOpen, onClose, isRestaurantOpen }: CartProps) {
                         <div className="flex items-center justify-between mt-3">
                           <div className="flex items-center gap-2">
                             <button
-                              onClick={() =>
-                                updateQuantity(item.product.id, item.quantity - 1)
-                              }
+                              onClick={() => updateQuantity(item.id, item.quantity - 1)}
                               className="p-1 rounded-lg border hover:bg-gray-50"
                             >
                               <Minus className="w-4 h-4" />
@@ -271,9 +302,7 @@ export function Cart({ isOpen, onClose, isRestaurantOpen }: CartProps) {
                             </span>
 
                             <button
-                              onClick={() =>
-                                updateQuantity(item.product.id, item.quantity + 1)
-                              }
+                              onClick={() => updateQuantity(item.id, item.quantity + 1)}
                               className="p-1 rounded-lg border hover:bg-gray-50"
                             >
                               <Plus className="w-4 h-4" />
@@ -281,7 +310,7 @@ export function Cart({ isOpen, onClose, isRestaurantOpen }: CartProps) {
                           </div>
 
                           <button
-                            onClick={() => removeItem(item.product.id)}
+                            onClick={() => removeItem(item.id)}
                             className="p-2 rounded-lg text-red-500 hover:bg-red-50"
                           >
                             <Trash2 className="w-4 h-4" />
@@ -310,7 +339,7 @@ export function Cart({ isOpen, onClose, isRestaurantOpen }: CartProps) {
                   type="text"
                   placeholder="Seu telefone"
                   value={customerPhone}
-                  onChange={(e) => setCustomerPhone(e.target.value)}
+                  onChange={(e) => setCustomerPhone(formatPhone(e.target.value))}
                   className="w-full border rounded-xl px-3 py-3 outline-none focus:ring-2 focus:ring-emerald-500"
                 />
 
@@ -336,12 +365,7 @@ export function Cart({ isOpen, onClose, isRestaurantOpen }: CartProps) {
         <div className="border-t p-4 space-y-4">
           <div className="flex items-center justify-between text-lg font-semibold">
             <span>Total</span>
-            <span>
-              {new Intl.NumberFormat("pt-BR", {
-                style: "currency",
-                currency: "BRL",
-              }).format(total)}
-            </span>
+            <span>{formatCurrency(total)}</span>
           </div>
 
           <button

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../../lib/supabase";
 
@@ -22,6 +22,7 @@ export function Products() {
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [saving, setSaving] = useState(false);
 
   const [form, setForm] = useState({
     category_id: "",
@@ -46,19 +47,47 @@ export function Products() {
   }, [navigate]);
 
   const fetchData = async () => {
-    const { data: categoriesData } = await supabase
-      .from("categories")
-      .select("*")
-      .eq("is_active", true)
-      .order("sort_order", { ascending: true });
+    try {
+      const { data: categoriesData, error: categoriesError } = await supabase
+        .from("categories")
+        .select("*")
+        .eq("is_active", true)
+        .order("sort_order", { ascending: true });
 
-    const { data: productsData } = await supabase
-      .from("products")
-      .select("*")
-      .order("created_at", { ascending: false });
+      if (categoriesError) {
+        console.error("Erro ao buscar categorias:", categoriesError);
+        alert("Erro ao buscar categorias.");
+        return;
+      }
 
-    setCategories(categoriesData || []);
-    setProducts(productsData || []);
+      const { data: productsData, error: productsError } = await supabase
+        .from("products")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (productsError) {
+        console.error("Erro ao buscar produtos:", productsError);
+        alert("Erro ao buscar produtos.");
+        return;
+      }
+
+      setCategories(categoriesData || []);
+      setProducts(productsData || []);
+    } catch (error) {
+      console.error("Erro inesperado ao buscar dados:", error);
+      alert("Erro inesperado ao buscar dados.");
+    }
+  };
+
+  const resetForm = () => {
+    setEditingId(null);
+    setForm({
+      category_id: "",
+      name: "",
+      description: "",
+      price: "",
+      image_url: "",
+    });
   };
 
   const uploadImage = async (file: File) => {
@@ -79,7 +108,8 @@ export function Products() {
         });
 
       if (error) {
-        alert("Erro ao subir imagem");
+        console.error("Erro ao subir imagem:", error);
+        alert("Erro ao subir imagem.");
         return;
       }
 
@@ -91,42 +121,79 @@ export function Products() {
         ...prev,
         image_url: data.publicUrl,
       }));
+    } catch (error) {
+      console.error("Erro inesperado ao subir imagem:", error);
+      alert("Erro inesperado ao subir imagem.");
     } finally {
       setUploadingImage(false);
     }
   };
 
-  const saveProduct = async (e: React.FormEvent) => {
+  const saveProduct = async (e: FormEvent) => {
     e.preventDefault();
 
-    const payload = {
-      category_id: form.category_id,
-      name: form.name,
-      description: form.description,
-      price: Number(String(form.price).replace(",", ".")),
-      image_url: form.image_url,
-      is_active: true,
-    };
-
-    if (editingId) {
-      await supabase.from("products").update(payload).eq("id", editingId);
-      alert("Produto atualizado");
-    } else {
-      await supabase.from("products").insert(payload);
-      alert("Produto criado");
+    if (!form.category_id) {
+      alert("Selecione a categoria.");
+      return;
     }
 
-    setEditingId(null);
+    if (!form.name.trim()) {
+      alert("Digite o nome do produto.");
+      return;
+    }
 
-    setForm({
-      category_id: "",
-      name: "",
-      description: "",
-      price: "",
-      image_url: "",
-    });
+    const parsedPrice = Number(String(form.price).replace(",", "."));
 
-    fetchData();
+    if (Number.isNaN(parsedPrice)) {
+      alert("Digite um preço válido.");
+      return;
+    }
+
+    try {
+      setSaving(true);
+
+      const payload = {
+        category_id: form.category_id,
+        name: form.name.trim(),
+        description: form.description.trim(),
+        price: parsedPrice,
+        image_url: form.image_url,
+        is_active: true,
+      };
+
+      if (editingId) {
+        const { error } = await supabase
+          .from("products")
+          .update(payload)
+          .eq("id", editingId);
+
+        if (error) {
+          console.error("Erro ao atualizar produto:", error);
+          alert("Erro ao atualizar produto.");
+          return;
+        }
+
+        alert("Produto atualizado com sucesso.");
+      } else {
+        const { error } = await supabase.from("products").insert(payload);
+
+        if (error) {
+          console.error("Erro ao criar produto:", error);
+          alert("Erro ao criar produto.");
+          return;
+        }
+
+        alert("Produto criado com sucesso.");
+      }
+
+      resetForm();
+      fetchData();
+    } catch (error) {
+      console.error("Erro inesperado ao salvar produto:", error);
+      alert("Erro inesperado ao salvar produto.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const editProduct = (product: Product) => {
@@ -144,10 +211,24 @@ export function Products() {
   };
 
   const deleteProduct = async (id: string) => {
-    if (!confirm("Excluir produto?")) return;
+    const confirmed = window.confirm("Excluir produto?");
+    if (!confirmed) return;
 
-    await supabase.from("products").delete().eq("id", id);
-    fetchData();
+    try {
+      const { error } = await supabase.from("products").delete().eq("id", id);
+
+      if (error) {
+        console.error("Erro ao excluir produto:", error);
+        alert("Erro ao excluir produto.");
+        return;
+      }
+
+      alert("Produto excluído com sucesso.");
+      fetchData();
+    } catch (error) {
+      console.error("Erro inesperado ao excluir produto:", error);
+      alert("Erro inesperado ao excluir produto.");
+    }
   };
 
   const logout = () => {
@@ -255,12 +336,31 @@ export function Products() {
                   src={form.image_url}
                   className="w-40 rounded-xl"
                   referrerPolicy="no-referrer"
+                  alt="Prévia do produto"
                 />
               )}
 
-              <button className="w-full bg-emerald-600 text-white py-3 rounded-xl">
-                {editingId ? "Atualizar Produto" : "Cadastrar Produto"}
-              </button>
+              <div className="flex gap-3">
+                <button
+                  type="submit"
+                  disabled={saving || uploadingImage}
+                  className="flex-1 bg-emerald-600 text-white py-3 rounded-xl disabled:opacity-50"
+                >
+                  {saving
+                    ? "Salvando..."
+                    : editingId
+                    ? "Atualizar Produto"
+                    : "Cadastrar Produto"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="px-4 py-3 bg-white border rounded-xl"
+                >
+                  Limpar
+                </button>
+              </div>
             </form>
           </div>
 
@@ -274,6 +374,7 @@ export function Products() {
                   src={product.image_url || "https://placehold.co/120x120?text=Sem+Foto"}
                   className="w-24 h-24 object-cover rounded-xl"
                   referrerPolicy="no-referrer"
+                  alt={product.name}
                 />
 
                 <div className="flex-1">

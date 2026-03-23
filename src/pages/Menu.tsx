@@ -11,14 +11,15 @@ import {
   getTodayHoursLabel,
   normalizeBusinessHours,
 } from "../lib/restaurantStatus";
+import type { Category, Product, RestaurantSettings } from "../types";
 
 export function Menu() {
-  const [categories, setCategories] = useState<any[]>([]);
-  const [products, setProducts] = useState<any[]>([]);
-  const [restaurant, setRestaurant] = useState<any>(null);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [restaurant, setRestaurant] = useState<RestaurantSettings | null>(null);
 
   const [activeCategory, setActiveCategory] = useState("");
-  const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
 
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -104,19 +105,19 @@ export function Menu() {
         .eq("is_active", true);
 
       setRestaurant({
-        ...restaurantData,
+        ...(restaurantData as RestaurantSettings),
         accepting_orders: restaurantData?.accepting_orders ?? true,
         automatic_schedule_enabled:
           restaurantData?.automatic_schedule_enabled ?? false,
         business_hours: normalizeBusinessHours(restaurantData?.business_hours),
       });
 
-      setCategories(categoriesData || []);
-      setProducts(productsData || []);
+      setCategories((categoriesData as Category[]) || []);
+      setProducts((productsData as Product[]) || []);
 
       if (categoriesData?.length) {
         const currentExists = categoriesData.some(
-          (category: any) => category.id === activeCategory
+          (category) => category.id === activeCategory
         );
 
         if (!currentExists) {
@@ -134,10 +135,11 @@ export function Menu() {
 
   const filteredProducts = products.filter((product) => {
     const matchCategory = product.category_id === activeCategory;
+    const search = searchQuery.toLowerCase();
 
     const matchSearch =
-      product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      product.description?.toLowerCase().includes(searchQuery.toLowerCase());
+      product.name.toLowerCase().includes(search) ||
+      product.description?.toLowerCase().includes(search);
 
     return searchQuery ? matchSearch : matchCategory;
   });
@@ -165,14 +167,12 @@ export function Menu() {
           </h1>
 
           <div className="flex flex-wrap gap-4 mt-2 text-sm text-gray-200">
-            {restaurant?.opening_hours && (
+            {restaurant?.opening_hours ? (
               <div className="flex items-center gap-1">
                 <Clock size={16} />
                 {restaurant.opening_hours}
               </div>
-            )}
-
-            {!restaurant?.opening_hours && (
+            ) : (
               <div className="flex items-center gap-1">
                 <Clock size={16} />
                 Hoje: {todayHoursLabel}

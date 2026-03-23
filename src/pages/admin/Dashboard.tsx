@@ -44,6 +44,7 @@ type OrderItem = {
 
 type Order = {
   id: string;
+  order_number: number;
   customer_name: string;
   customer_phone: string;
   customer_address: string;
@@ -289,9 +290,93 @@ export function Dashboard() {
     }
   };
 
+  const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat("pt-BR", {
+      style: "currency",
+      currency: "BRL",
+    }).format(Number(value || 0));
+  };
+
+  const formatDateTime = (dateString: string) => {
+    return new Date(dateString).toLocaleString("pt-BR");
+  };
+
+  const normalizePhoneForWhatsApp = (phone: string) => {
+    const digits = (phone || "").replace(/\D/g, "");
+
+    if (!digits) return "";
+
+    if (digits.startsWith("55")) {
+      return digits;
+    }
+
+    return `55${digits}`;
+  };
+
+  const buildWhatsAppMessage = (order: Order) => {
+    const itemsText =
+      order.items && order.items.length > 0
+        ? order.items
+            .map((item) => {
+              const optionsText =
+                item.options && item.options.length > 0
+                  ? `\n  Adicionais: ${item.options
+                      .map((option) => option.option_name)
+                      .join(", ")}`
+                  : "";
+
+              const notesText = item.notes ? `\n  Obs: ${item.notes}` : "";
+
+              return `• ${item.quantity}x ${item.product_name}${optionsText}${notesText}`;
+            })
+            .join("\n")
+        : "• Itens não encontrados";
+
+    const orderNotesText = order.notes
+      ? `\nObservação do pedido: ${order.notes}`
+      : "";
+
+    return `Olá, ${order.customer_name}! Seu pedido #${order.order_number} saiu para entrega e está a caminho. 🚚
+
+Pedido #${order.order_number}
+Cliente: ${order.customer_name}
+Telefone: ${order.customer_phone}
+Endereço: ${order.customer_address}
+
+Itens:
+${itemsText}
+
+Total: ${formatCurrency(Number(order.total || 0))}${orderNotesText}
+
+Obrigado por comprar com a gente!`;
+  };
+
+  const sendWhatsAppDeliveryMessage = (order: Order) => {
+    const phone = normalizePhoneForWhatsApp(order.customer_phone);
+
+    if (!phone) {
+      alert("Não foi possível abrir o WhatsApp porque o telefone do cliente está inválido.");
+      return;
+    }
+
+    const message = buildWhatsAppMessage(order);
+    const whatsappUrl = `https://wa.me/${phone}?text=${encodeURIComponent(
+      message
+    )}`;
+
+    window.open(whatsappUrl, "_blank");
+  };
+
   const updateOrderStatus = async (orderId: string, newStatus: string) => {
     try {
       setUpdatingId(orderId);
+
+      const order = orders.find((item) => item.id === orderId);
+
+      if (!order) {
+        alert("Pedido não encontrado.");
+        return;
+      }
 
       const { error } = await supabase
         .from("orders")
@@ -304,11 +389,19 @@ export function Dashboard() {
         return;
       }
 
+      const updatedOrder = { ...order, status: newStatus };
+
       setOrders((prev) =>
-        prev.map((order) =>
-          order.id === orderId ? { ...order, status: newStatus } : order
+        prev.map((currentOrder) =>
+          currentOrder.id === orderId
+            ? { ...currentOrder, status: newStatus }
+            : currentOrder
         )
       );
+
+      if (newStatus === "saiu para entrega") {
+        sendWhatsAppDeliveryMessage(updatedOrder);
+      }
     } catch (error) {
       console.error("Erro inesperado ao atualizar status:", error);
       alert("Erro inesperado ao atualizar status.");
@@ -331,17 +424,6 @@ export function Dashboard() {
       orderDate.getMonth() === now.getMonth() &&
       orderDate.getFullYear() === now.getFullYear()
     );
-  };
-
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    }).format(Number(value || 0));
-  };
-
-  const formatDateTime = (dateString: string) => {
-    return new Date(dateString).toLocaleString("pt-BR");
   };
 
   const todayOrders = useMemo(() => {
@@ -420,13 +502,13 @@ export function Dashboard() {
 
     if (normalizedSearch) {
       result = result.filter((order) => {
-        const idShort = order.id.slice(0, 8).toLowerCase();
+        const orderNumber = String(order.order_number || "").toLowerCase();
         const customerName = order.customer_name?.toLowerCase() || "";
         const customerPhone = order.customer_phone?.toLowerCase() || "";
         const customerAddress = order.customer_address?.toLowerCase() || "";
 
         return (
-          idShort.includes(normalizedSearch) ||
+          orderNumber.includes(normalizedSearch) ||
           customerName.includes(normalizedSearch) ||
           customerPhone.includes(normalizedSearch) ||
           customerAddress.includes(normalizedSearch)
@@ -710,9 +792,7 @@ export function Dashboard() {
           <div className="flex flex-col gap-4 mb-5">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
-                <h2 className="text-2xl font-bold text-gray-900">
-                  Pedidos
-                </h2>
+                <h2 className="text-2xl font-bold text-gray-900">Pedidos</h2>
                 <p className="text-gray-500 mt-1">
                   Filtre por status e busque pedidos rapidamente.
                 </p>
@@ -793,7 +873,7 @@ export function Dashboard() {
                       <div className="grid sm:grid-cols-2 gap-3 text-sm text-gray-700">
                         <div className="rounded-2xl bg-white border p-3">
                           <p>
-                            <strong>Pedido:</strong> #{order.id.slice(0, 8)}
+                            <strong>Pedido:</strong> #{order.order_number}
                           </p>
                           <p className="mt-2 flex items-center gap-2">
                             <Phone className="w-4 h-4 text-gray-400" />
@@ -919,17 +999,15 @@ export function Dashboard() {
                           Atualizando status...
                         </p>
                       )}
+
+                      <p className="text-xs text-gray-500 mt-3">
+                        Ao marcar como <strong>saiu para entrega</strong>, o
+                        WhatsApp do cliente será aberto com a mensagem pronta.
+                      </p>
                     </div>
                   </div>
                 </div>
               ))}
-            </div>
-          )}
-
-          {!loading && filteredOrders.length > 6 && (
-            <div className="mt-5 text-sm text-gray-500 flex items-center gap-2">
-              <XCircle className="w-4 h-4" />
-              Mostrando apenas os 6 pedidos mais recentes deste filtro.
             </div>
           )}
         </div>
